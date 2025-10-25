@@ -21,7 +21,14 @@ class FileUploaderApp:
 
         self.local_path = "./"
         self.local_folder_list = []
+        self.filtered_folder_list = []  # 用於分頁顯示的資料夾列表
         self.last_selected_index = None  # 用於 Shift 多選功能
+        
+        # 分頁相關變數
+        self.page_size = 50  # 每頁顯示的資料夾數量
+        self.current_page = 0
+        self.total_pages = 0
+        
         self.prompt_credentials()
         self.master.wait_window(self.master.winfo_children()[-1])  # Wait for the credentials window to close
 
@@ -72,6 +79,7 @@ class FileUploaderApp:
         self.create_server_frame()
         self.create_local_frame()
         self.create_search_frame()
+        self.create_pagination_frame()
         self.create_local_listbox()
         self.create_upload_button()
         self.create_progress_bar()
@@ -113,13 +121,34 @@ class FileUploaderApp:
 
         tk.Button(search_frame, text="搜尋", command=lambda: self.show_local_relate_folder(self.search_var.get())).pack(side=tk.RIGHT, padx=5)
 
+    def create_pagination_frame(self):
+        """創建分頁控制框架"""
+        pagination_frame = tk.Frame(self.master)
+        pagination_frame.pack(pady=5, fill=tk.X)
+
+        self.page_info_label = tk.Label(pagination_frame, text="頁數: 0 / 0 (總共 0 個資料夾)")
+        self.page_info_label.pack(side=tk.LEFT, padx=10)
+
+        tk.Button(pagination_frame, text="◀◀ 首頁", command=self.go_to_first_page).pack(side=tk.LEFT, padx=2)
+        tk.Button(pagination_frame, text="◀ 上一頁", command=self.go_to_prev_page).pack(side=tk.LEFT, padx=2)
+        tk.Button(pagination_frame, text="下一頁 ▶", command=self.go_to_next_page).pack(side=tk.LEFT, padx=2)
+        tk.Button(pagination_frame, text="末頁 ▶▶", command=self.go_to_last_page).pack(side=tk.LEFT, padx=2)
+        
+        # 每頁顯示數量設置
+        tk.Label(pagination_frame, text="每頁顯示:").pack(side=tk.LEFT, padx=(20, 5))
+        self.page_size_var = tk.StringVar(value="50")
+        page_size_combo = ttk.Combobox(pagination_frame, textvariable=self.page_size_var, 
+                                       values=["20", "50", "100", "200"], width=8)
+        page_size_combo.pack(side=tk.LEFT, padx=2)
+        page_size_combo.bind('<<ComboboxSelected>>', self.on_page_size_change)
+
     def create_local_listbox(self):
         self.local_listbox = tk.Listbox(self.master, selectmode=tk.EXTENDED, width=50, height=15)
         self.local_listbox.pack(pady=10, expand=True, fill=tk.BOTH)
         
         # 綁定點擊事件以支持 Shift 和 Ctrl/Cmd 多選
         self.local_listbox.bind('<Button-1>', self.on_listbox_click)
-        self.local_listbox.bind('<<ListboxSelect>>', self.on_local_folder_select)
+        # 移除 ListboxSelect 事件綁定以避免彈窗
 
     def create_upload_button(self):
         tk.Button(self.master, text="上傳", command=self.upload_files).pack(pady=10)
@@ -149,20 +178,88 @@ class FileUploaderApp:
             self.update_server_folders()
             self.server_folder_var.set(new_folder_name)  # Optionally select the new folder
 
+    def sort_folders_by_creation_time(self, folder_list):
+        """統一的排序方法：按建立時間排序（最新的在前）"""
+        try:
+            return sorted(folder_list, 
+                         key=lambda x: os.path.getctime(os.path.join(self.local_path, x)),
+                         reverse=True)
+        except Exception as e:
+            print(f"排序錯誤: {str(e)}")
+            return folder_list
+
+    def calculate_pagination(self):
+        """計算分頁信息"""
+        total_items = len(self.local_folder_list)
+        self.total_pages = (total_items + self.page_size - 1) // self.page_size if total_items > 0 else 0
+        if self.current_page >= self.total_pages and self.total_pages > 0:
+            self.current_page = self.total_pages - 1
+        elif self.current_page < 0:
+            self.current_page = 0
+
+    def update_page_info(self):
+        """更新分頁資訊顯示"""
+        total_items = len(self.local_folder_list)
+        current_page_display = self.current_page + 1 if self.total_pages > 0 else 0
+        self.page_info_label.config(
+            text=f"頁數: {current_page_display} / {self.total_pages} (總共 {total_items} 個資料夾)"
+        )
+
+    def get_current_page_items(self):
+        """獲取當前頁的資料夾列表"""
+        start_idx = self.current_page * self.page_size
+        end_idx = start_idx + self.page_size
+        return self.local_folder_list[start_idx:end_idx]
+
+    def go_to_first_page(self):
+        """跳到首頁"""
+        self.current_page = 0
+        self.update_local_files()
+
+    def go_to_prev_page(self):
+        """上一頁"""
+        if self.current_page > 0:
+            self.current_page -= 1
+            self.update_local_files()
+
+    def go_to_next_page(self):
+        """下一頁"""
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+            self.update_local_files()
+
+    def go_to_last_page(self):
+        """跳到末頁"""
+        if self.total_pages > 0:
+            self.current_page = self.total_pages - 1
+            self.update_local_files()
+
+    def on_page_size_change(self, event=None):
+        """當每頁顯示數量改變時"""
+        try:
+            self.page_size = int(self.page_size_var.get())
+            self.current_page = 0
+            self.update_local_files()
+        except ValueError:
+            pass
+
     def browse_local_folder(self):
         self.local_path = filedialog.askdirectory()
         if self.local_path:
             self.local_folder_var.set(self.local_path.split("/")[-1])
-            # Only list directories (folders) and sort by modification time (newest first)
-            self.local_folder_list = sorted([item for item in os.listdir(self.local_path) 
-                           if os.path.isdir(os.path.join(self.local_path, item))], 
-                          key=lambda x: os.path.getmtime(os.path.join(self.local_path, x)),
-                          reverse=True)
+            # 只列出資料夾並按建立時間排序（最新的在前）
+            folders = [item for item in os.listdir(self.local_path) 
+                      if os.path.isdir(os.path.join(self.local_path, item))]
+            self.local_folder_list = self.sort_folders_by_creation_time(folders)
+            self.current_page = 0  # 重置到第一頁
             self.update_local_files()
 
     def refresh_local_folder(self):
         if self.local_path:
-            self.local_folder_list = sorted(os.listdir(self.local_path), key=lambda x: os.path.getctime(os.path.join(self.local_path, x)))
+            folders = [item for item in os.listdir(self.local_path)
+                      if os.path.isdir(os.path.join(self.local_path, item))]
+            self.local_folder_list = self.sort_folders_by_creation_time(folders)
+            self.current_page = 0  # 重置到第一頁
             self.update_local_files()
 
     def reconnect_server(self):
@@ -173,12 +270,21 @@ class FileUploaderApp:
             messagebox.showerror("錯誤", "無法重新連線到伺服器")
 
     def show_local_relate_folder(self, name):
-        self.local_folder_list = [folder for folder in os.listdir(self.local_path) if name in folder]
+        # 先過濾，再按建立時間排序
+        folders = [folder for folder in os.listdir(self.local_path) 
+                  if name in folder and os.path.isdir(os.path.join(self.local_path, folder))]
+        self.local_folder_list = self.sort_folders_by_creation_time(folders)
+        self.current_page = 0  # 重置到第一頁
         self.update_local_files()
 
     def update_local_files(self):
+        """更新顯示當前頁的資料夾列表"""
+        self.calculate_pagination()
+        self.update_page_info()
+        
         self.local_listbox.delete(0, tk.END)
-        for item in self.local_folder_list:
+        current_page_items = self.get_current_page_items()
+        for item in current_page_items:
             self.local_listbox.insert(tk.END, item)
 
     def on_listbox_click(self, event):
@@ -214,16 +320,6 @@ class FileUploaderApp:
             self.local_listbox.selection_clear(0, tk.END)
             self.local_listbox.selection_set(index)
             self.last_selected_index = index
-
-    def on_local_folder_select(self, event):
-        selected_indices = self.local_listbox.curselection()
-        if len(selected_indices) == 1:
-            selected_folder = self.local_listbox.get(selected_indices[0])
-            folder_path = os.path.join(self.local_path, selected_folder)
-            if os.path.isdir(folder_path):
-                file_count = len(os.listdir(folder_path))
-                # 不使用 messagebox，改為在狀態列顯示（可選）
-                # messagebox.showinfo("資料夾內容", f"資料夾 '{selected_folder}' 中有 {file_count} 個檔案")
 
     def upload_files(self):
         selected_server_folder = self.server_folder_var.get()
