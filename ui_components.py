@@ -48,29 +48,99 @@ class FileUploaderApp:
 
     def prompt_credentials(self):
         credentials_window = tk.Toplevel(self.master)
-        credentials_window.title("輸入伺服器用戶名和密碼")
-        credentials_window.geometry("300x180")
+        credentials_window.title("輸入伺服器登入資訊")
+        credentials_window.geometry("450x320")
 
         tk.Label(credentials_window, text="用戶名:").pack(pady=5)
-        username_entry = tk.Entry(credentials_window)
+        username_entry = tk.Entry(credentials_window, width=40)
         username_entry.pack(pady=5)
 
-        tk.Label(credentials_window, text="密碼:").pack(pady=5)
-        password_entry = tk.Entry(credentials_window, show="*")
-        password_entry.pack(pady=5)
+        # 認證方式選擇
+        auth_method_var = tk.StringVar(value="password")
+        
+        tk.Label(credentials_window, text="認證方式:").pack(pady=5)
+        auth_frame = tk.Frame(credentials_window)
+        auth_frame.pack(pady=5)
+        
+        tk.Radiobutton(auth_frame, text="密碼", variable=auth_method_var, 
+                      value="password", command=lambda: toggle_auth_fields()).pack(side=tk.LEFT, padx=10)
+        tk.Radiobutton(auth_frame, text="SSH 金鑰", variable=auth_method_var, 
+                      value="key", command=lambda: toggle_auth_fields()).pack(side=tk.LEFT, padx=10)
+
+        # 密碼欄位
+        password_frame = tk.Frame(credentials_window)
+        password_frame.pack(pady=5)
+        tk.Label(password_frame, text="密碼:").pack()
+        password_entry = tk.Entry(password_frame, show="*", width=40)
+        password_entry.pack()
+
+        # SSH 金鑰欄位
+        key_frame = tk.Frame(credentials_window)
+        tk.Label(key_frame, text="私鑰檔案:").pack()
+        key_path_frame = tk.Frame(key_frame)
+        key_path_frame.pack()
+        key_path_var = tk.StringVar()
+        key_path_entry = tk.Entry(key_path_frame, textvariable=key_path_var, width=30)
+        key_path_entry.pack(side=tk.LEFT, padx=5)
+        
+        def browse_key_file():
+            key_file = filedialog.askopenfilename(
+                title="選擇 SSH 私鑰檔案",
+                filetypes=[("所有檔案", "*"), ("PEM 檔案", "*.pem"), ("私鑰", "id_*")]
+            )
+            if key_file:
+                key_path_var.set(key_file)
+        
+        tk.Button(key_path_frame, text="瀏覽", command=browse_key_file).pack(side=tk.LEFT)
+        
+        tk.Label(key_frame, text="私鑰密碼 (選填):").pack(pady=(10, 0))
+        key_passphrase_entry = tk.Entry(key_frame, show="*", width=40)
+        key_passphrase_entry.pack()
+
+        def toggle_auth_fields():
+            if auth_method_var.get() == "password":
+                password_frame.pack(pady=5)
+                key_frame.pack_forget()
+            else:
+                password_frame.pack_forget()
+                key_frame.pack(pady=5)
+
+        toggle_auth_fields()
 
         def submit_credentials():
             self.server_handler.username = username_entry.get()
-            self.server_handler.password = password_entry.get()
+            
+            if auth_method_var.get() == "password":
+                self.server_handler.password = password_entry.get()
+                self.server_handler.key_path = ""
+            else:
+                self.server_handler.key_path = key_path_var.get()
+                self.server_handler.key_passphrase = key_passphrase_entry.get() if key_passphrase_entry.get() else None
+                self.server_handler.password = ""
+            
+            if not self.server_handler.username:
+                messagebox.showerror("錯誤", "請輸入用戶名")
+                return
+            
+            if auth_method_var.get() == "key" and not self.server_handler.key_path:
+                messagebox.showerror("錯誤", "請選擇 SSH 私鑰檔案")
+                return
+            
             sub_btn.config(text="連接中...")
             sub_btn.config(state='disabled')
             credentials_window.update_idletasks()
+            
             if self.server_handler.try_connect():
                 credentials_window.destroy()
             else:
                 sub_btn.config(text="提交")
                 sub_btn.config(state='normal')
-                messagebox.showerror("錯誤", "無法連接到伺服器")
+                error_msg = "無法連接到伺服器\n\n"
+                if auth_method_var.get() == "key":
+                    error_msg += "請確認:\n- SSH 私鑰檔案路徑正確\n- 私鑰密碼正確（如有設定）\n- 伺服器允許此金鑰登入"
+                else:
+                    error_msg += "請確認用戶名和密碼是否正確"
+                messagebox.showerror("錯誤", error_msg)
 
         sub_btn = tk.Button(credentials_window, text="提交", command=submit_credentials)
         sub_btn.pack(pady=20)
@@ -387,9 +457,11 @@ class FileUploaderApp:
             messagebox.showerror("錯誤", f"上傳過程中發生錯誤: {str(e)}")
 
     def update_progress(self, filename, size, sent):
-        percent = float(sent) / float(size) * 100
-        self.progress_var.set(percent)
-        self.master.update_idletasks()
+        """更新進度條"""
+        if size > 0:
+            percent = float(sent) / float(size) * 100
+            self.progress_var.set(percent)
+            self.master.update_idletasks()
 
     def mark_uploaded_items(self, uploaded_items):
         for i in range(self.local_listbox.size()):
