@@ -37,7 +37,7 @@ class FileUploaderApp:
         loading_label.pack(pady=20)
         self.master.update_idletasks()
 
-        if not self.server_handler.try_connect():
+        if not self.server_handler.try_connect()[0]:
             messagebox.showerror("錯誤", "無法連接到伺服器")
             master.quit()
             exit()
@@ -85,10 +85,20 @@ class FileUploaderApp:
         
         def browse_key_file():
             key_file = filedialog.askopenfilename(
-                title="選擇 SSH 私鑰檔案",
-                filetypes=[("所有檔案", "*"), ("PEM 檔案", "*.pem"), ("私鑰", "id_*")]
+                title="選擇 SSH 私鑰檔案（不是 .pub 公鑰檔案）",
+                initialdir=os.path.expanduser("~/.ssh"),
+                filetypes=[("SSH 私鑰", "id_*"), ("PEM 檔案", "*.pem"), ("所有檔案", "*")]
             )
             if key_file:
+                # 檢查是否誤選了公鑰檔案
+                if key_file.endswith('.pub'):
+                    messagebox.showwarning(
+                        "警告", 
+                        "您選擇的是公鑰檔案（.pub）\n\n"
+                        "請選擇私鑰檔案（沒有 .pub 副檔名）\n"
+                        f"例如：{key_file[:-4]}"
+                    )
+                    return
                 key_path_var.set(key_file)
         
         tk.Button(key_path_frame, text="瀏覽", command=browse_key_file).pack(side=tk.LEFT)
@@ -126,21 +136,39 @@ class FileUploaderApp:
                 messagebox.showerror("錯誤", "請選擇 SSH 私鑰檔案")
                 return
             
+            # 再次確認不是公鑰檔案
+            if auth_method_var.get() == "key" and self.server_handler.key_path.endswith('.pub'):
+                messagebox.showerror(
+                    "錯誤", 
+                    "您選擇的是公鑰檔案（.pub）\n\n"
+                    "請選擇私鑰檔案（沒有 .pub 副檔名）"
+                )
+                return
+            
             sub_btn.config(text="連接中...")
             sub_btn.config(state='disabled')
             credentials_window.update_idletasks()
             
-            if self.server_handler.try_connect():
+            success, error_detail = self.server_handler.try_connect()
+            if success:
                 credentials_window.destroy()
             else:
                 sub_btn.config(text="提交")
                 sub_btn.config(state='normal')
                 error_msg = "無法連接到伺服器\n\n"
                 if auth_method_var.get() == "key":
-                    error_msg += "請確認:\n- SSH 私鑰檔案路徑正確\n- 私鑰密碼正確（如有設定）\n- 伺服器允許此金鑰登入"
+                    error_msg += "可能的原因:\n"
+                    error_msg += "• SSH 私鑰檔案格式不正確或損壞\n"
+                    error_msg += "• 私鑰密碼錯誤（如有設定）\n"
+                    error_msg += "• 伺服器不允許此金鑰登入\n"
+                    error_msg += "• 伺服器連線資訊錯誤\n\n"
                 else:
-                    error_msg += "請確認用戶名和密碼是否正確"
-                messagebox.showerror("錯誤", error_msg)
+                    error_msg += "請確認用戶名和密碼是否正確\n\n"
+                
+                if error_detail:
+                    error_msg += f"詳細錯誤:\n{error_detail}"
+                
+                messagebox.showerror("連線錯誤", error_msg)
 
         sub_btn = tk.Button(credentials_window, text="提交", command=submit_credentials)
         sub_btn.pack(pady=20)
@@ -333,11 +361,15 @@ class FileUploaderApp:
             self.update_local_files()
 
     def reconnect_server(self):
-        if self.server_handler.try_connect():
+        success, error_detail = self.server_handler.try_connect()
+        if success:
             messagebox.showinfo("成功", "重新連線成功")
             self.update_server_folders()
         else:
-            messagebox.showerror("錯誤", "無法重新連線到伺服器")
+            error_msg = "無法重新連線到伺服器"
+            if error_detail:
+                error_msg += f"\n\n詳細錯誤:\n{error_detail}"
+            messagebox.showerror("錯誤", error_msg)
 
     def show_local_relate_folder(self, name):
         # 先過濾，再按建立時間排序

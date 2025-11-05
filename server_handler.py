@@ -22,19 +22,35 @@ class ServerHandler:
         
         # 如果有提供私鑰路徑，使用金鑰認證
         if self.key_path and os.path.exists(self.key_path):
-            try:
-                # 嘗試載入私鑰
-                private_key = paramiko.RSAKey.from_private_key_file(self.key_path, password=self.key_passphrase)
-                ssh.connect(self.hostname, username=self.username, pkey=private_key)
-            except paramiko.ssh_exception.SSHException:
-                # 如果 RSA 失敗，嘗試 Ed25519
+            private_key = None
+            key_load_errors = []
+            
+            # 嘗試不同的金鑰格式（Ed25519 優先，因為最常用且最安全）
+            key_types = [
+                ('Ed25519', paramiko.Ed25519Key),
+                ('RSA', paramiko.RSAKey),
+                ('ECDSA', paramiko.ECDSAKey),
+                ('DSS', paramiko.DSSKey),
+            ]
+            
+            for key_name, key_class in key_types:
                 try:
-                    private_key = paramiko.Ed25519Key.from_private_key_file(self.key_path, password=self.key_passphrase)
-                    ssh.connect(self.hostname, username=self.username, pkey=private_key)
-                except:
-                    # 最後嘗試 ECDSA
-                    private_key = paramiko.ECDSAKey.from_private_key_file(self.key_path, password=self.key_passphrase)
-                    ssh.connect(self.hostname, username=self.username, pkey=private_key)
+                    private_key = key_class.from_private_key_file(
+                        self.key_path, 
+                        password=self.key_passphrase
+                    )
+                    print(f"Successfully loaded {key_name} key")
+                    break
+                except Exception as e:
+                    key_load_errors.append(f"{key_name}: {str(e)}")
+                    continue
+            
+            if private_key is None:
+                error_details = "\n".join(key_load_errors)
+                raise Exception(f"無法載入私鑰檔案。嘗試的格式:\n{error_details}")
+            
+            # 使用私鑰連接
+            ssh.connect(self.hostname, username=self.username, pkey=private_key)
         else:
             # 使用密碼認證（向後兼容）
             ssh.connect(self.hostname, username=self.username, password=self.password)
@@ -43,11 +59,13 @@ class ServerHandler:
 
     def try_connect(self):
         try:
-            with self.connect():
-                return True
+            ssh = self.connect()
+            ssh.close()
+            return True, None
         except Exception as e:
-            print(f"Error connecting to server: {str(e)}")
-            return False
+            error_msg = str(e)
+            print(f"Error connecting to server: {error_msg}")
+            return False, error_msg
 
     def list_folders(self):
         try:
