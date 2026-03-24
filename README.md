@@ -69,14 +69,34 @@ python main.py
 ```
 .
 ├── main.py                 # 程式入口
-├── ui_components.py        # UI 介面組件
-├── server_handler.py       # 伺服器連接處理
+├── src/                    # 原始碼套件
+│   ├── __init__.py
+│   ├── server/             # 伺服器處理模組
+│   │   ├── __init__.py
+│   │   └── handler.py
+│   ├── ui/                 # UI 介面模組
+│   │   ├── __init__.py
+│   │   └── components.py
+│   ├── models/             # 資料模型
+│   │   └── __init__.py
+│   └── utils/              # 工具函式
+│       ├── __init__.py
+│       └── file_utils.py   # 優化的資料夾掃描器
 ├── requirements.txt        # Python 依賴
 ├── .env                    # 環境變數（不提交到 Git）
 ├── .env.example            # 環境變數範本
 ├── .gitignore              # Git 忽略文件
 └── README.md               # 說明文件
 ```
+
+## 效能優化
+
+本專案使用優化的資料夾掃描演算法：
+
+- 使用 `os.scandir()` 替代 `os.listdir()` + `os.path.isdir()`
+- 減少系統呼叫次數，批次取得目錄中所有資料夾的 metadata
+- 快取資料夾資訊，避免重複的檔案系統查詢
+- 搜尋時維持排序順序，無需重新排序
 
 ## 問題排除
 
